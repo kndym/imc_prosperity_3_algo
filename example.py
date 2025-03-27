@@ -3,12 +3,49 @@ from typing import List
 import string
 
 class TradeHistory:
-    def __init__(self, length=10):
+    def __init__(self, max_length=10):
         self.ask_list=[]
+        self.bid_list=[]
+        self.max_length=max_length
+    def push_ask(self, ask):
+        if len(self.ask_list)==self.max_length:
+            self.ask_list=self.ask_list[1:]+[ask]
+        else:
+            self.ask_list.append(ask)
+        self.current_ask=ask
+    def push_bid(self, bid):
+        if len(self.ask_list)==self.max_length:
+            self.ask_list=self.ask_list[1:]+[bid]
+        else:
+            self.ask_list.append(bid)
+        self.current_bid=bid
+    def push_both(self, ask, bid):
+        self.push_ask(ask)
+        self.push_bid(bid)
+    def is_falling(self):
+        if len(self.ask_list)==self.max_length and len(self.bid_list)==self.max_length:
+            max_bid=max(self.bid_list[:-1])
+            if self.current_ask<max_bid:
+                return True
+            else:
+                return False
+        else:
+            return False
+    def is_rising(self):
+        if len(self.ask_list)==self.max_length and len(self.bid_list)==self.max_length:
+            min_ask=min(self.ask_list[:-1])
+            if self.current_bid>min_ask:
+                return True
+            else:
+                return False
+        else:
+            return False
+        
+            
 
 
 class Trader:
-    def run(self, state: TradingState):
+    def run(self, state: TradingState, history: TradeHistory):
         print("traderData: " + state.traderData)
         print("Observations: " + str(state.observations))
         trade_dict={"RAINFOREST_RESIN": [10000, 10000], 
@@ -28,7 +65,7 @@ class Trader:
     
             if len(order_depth.buy_orders) != 0:
                  for bid, bid_amount in order_depth.sell_orders.items():
-                    if int(ask) > sell_high:
+                    if int(bid) > sell_high:
                         print("BUY", str(-bid_amount) + "x", bid)
                         orders.append(Order(product, bid, -bid_amount))
             
