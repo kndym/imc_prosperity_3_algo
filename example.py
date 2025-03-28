@@ -11,6 +11,7 @@ class TradeHistory:
         self.trade_state="H"
         self.buy_low=-1
         self.sell_high=1e10
+        self.position=0
     def push_ask(self, ask):
         if len(self.ask_list)==self.max_length:
             self.ask_list=self.ask_list[1:]+[ask]
@@ -50,7 +51,7 @@ class TradeHistory:
             if self.current_bid>min_ask:
                 if self.trade_state=="H":
                     self.trade_state="S"
-                    self.sell_high=np.mean(self.ask_list[:-1])
+                    self.sell_high=min_ask
                 elif self.trade_state=="B":
                     self.trade_state="H"
                 else:
@@ -60,37 +61,44 @@ class TradeHistory:
                 return False
         else:
             return False
+    def add_pos(self, num):
+        self.position-=num
                   
 full_history={}
 
-def resin_strat(buy_low, sell_high, position, order_depth, orders, symbol):
+def resin_strat(history, buy_low, sell_high, order_depth, orders, symbol):
+    resin_history=history[symbol]
     if len(order_depth.sell_orders) != 0:
         for ask, ask_amount in order_depth.sell_orders.items():
-            if int(ask) < buy_low and position<100:
-                print("BUY", str(-ask_amount) + "x", ask)
+            if int(ask) < buy_low:
+                print("BUY", symbol, str(-ask_amount) + "x", ask)
                 orders.append(Order(symbol, ask, -ask_amount))
+                resin_history.add_pos(ask_amount)
 
     if len(order_depth.buy_orders) != 0:
-        for bid, bid_amount in order_depth.sell_orders.items():
-            if int(bid) > sell_high and position>0:
-                print("SELL", str(-bid_amount) + "x", bid)
-                orders.append(Order(symbol, bid, -bid_amount))   
+        for bid, bid_amount in order_depth.buy_orders.items():
+            if int(bid) > sell_high:
+                print("SELL", symbol, str(-bid_amount) + "x", bid)
+                orders.append(Order(symbol, bid, -bid_amount)) 
+                resin_history.add_pos(bid_amount)  
 
-def kelp_strat(history, position, order_depth, orders, symbol) :
+def kelp_strat(history, order_depth, orders, symbol) :
     kelp_history=history[symbol]
     if len(order_depth.sell_orders) != 0:
-        if kelp_history.trade_state=="B" and position<100:
+        if kelp_history.trade_state=="B":
             for ask, ask_amount in order_depth.sell_orders.items():
                 if int(ask) < kelp_history.buy_low:
-                    print("BUY", str(-bid_amount) + "x", bid)
-                    orders.append(Order(symbol, bid, -bid_amount))   
+                    print("BUY", symbol, str(-ask_amount) + "x", bid)
+                    orders.append(Order(symbol, ask, -ask_amount))  
+                    kelp_history.add_pos(ask_amount) 
 
     if len(order_depth.buy_orders) != 0:
-        if kelp_history.trade_state=="S" and position>0:
-            for bid, bid_amount in order_depth.sell_orders.items():
-                if int(bid) < kelp_history.sell_high:
-                    print("SELL", str(-ask_amount) + "x", ask)
-                    orders.append(Order(symbol, ask, -ask_amount))  
+        if kelp_history.trade_state=="S":
+            for bid, bid_amount in order_depth.buy_orders.items():
+                if int(bid) > kelp_history.sell_high:
+                    print("SELL", symbol, str(-bid_amount) + "x", ask)
+                    orders.append(Order(symbol, bid, -bid_amount)) 
+                    kelp_history.add_pos(bid_amount)  
 
 class Trader:
     def run(self, state: TradingState):
@@ -102,25 +110,27 @@ class Trader:
         time=state.timestamp
         if time==0:
             for symbol in state.order_depths:
-                full_history[symbol]=TradeHistory
-        for symbol in state.order_depths:
+                full_history[symbol]=TradeHistory()
+        for i, symbol in enumerate(state.order_depths):
             if symbol not in full_history:
                 full_history[symbol] = TradeHistory() 
             order_depth: OrderDepth = state.order_depths[symbol]
             orders: List[Order] = []
-            current_product=state.listings[symbol].denomination
-            position=state.position[current_product]
             if len(order_depth.sell_orders) != 0:
                 best_ask, best_ask_amount = list(order_depth.sell_orders.items())[0]
                 full_history[symbol].push_ask(best_ask)
             if len(order_depth.buy_orders) != 0:
                 best_bid, best_bid_amount = list(order_depth.buy_orders.items())[0]
                 full_history[symbol].push_bid(best_bid)
+            if full_history[symbol].trade_state=="S":
+                print("S_STATE", symbol)
+            elif full_history[symbol].trade_state=="B":
+                print("B_STATE", symbol)
             buy_low, sell_high = trade_dict[symbol]
             if symbol=="KELP":
-                resin_strat(buy_low, sell_high, position, order_depth, orders, symbol)
+                kelp_strat(full_history, order_depth, orders, symbol)
             elif symbol=="RAINFOREST_RESIN":
-                kelp_strat(full_history, position, order_depth, orders, symbol)
+                resin_strat(full_history, buy_low, sell_high, order_depth, orders, symbol)
             
             result[symbol] = orders
     
