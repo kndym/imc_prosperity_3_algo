@@ -3,7 +3,6 @@ from typing import Any
 
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 
-
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
@@ -57,7 +56,11 @@ class Logger:
     def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
         compressed = []
         for listing in listings.values():
-            compressed.append([listing.symbol, listing.product, listing.denomination])
+            if type(listing)==dict:
+                listing_v2=Listing(**listing)
+            else:
+                listing_v2=listing
+            compressed.append([listing_v2.symbol, listing_v2.product, listing_v2.denomination])
 
         return compressed
 
@@ -116,5 +119,6 @@ class Logger:
             return value
 
         return value[: max_length - 3] + "..."
+
 
 
