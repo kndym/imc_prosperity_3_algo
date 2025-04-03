@@ -163,3 +163,4 @@ class Trader:
             result[symbol] = orders
         self.logger.flush(state, result, 1, "SAMPLE")
         return result, 1, "SAMPLE"
+    
