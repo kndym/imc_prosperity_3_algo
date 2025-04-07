@@ -15,7 +15,7 @@ class Trader:
         "RAINFOREST_RESIN": {"fp_mean":10000, "fp_dev":1.5, "limit":50},
         "KELP": {"buy_low": 2015, "sell_high": 2020},
         "AMETHYSTS": {"fp_mean": 10000, "fp_dev":0.01, "limit":50},
-        "STARFRUIT": {"fp_mean":5000, "fp_dev":50, "limit":50, "sigma":1}
+        "STARFRUIT": {"fp_mean":5000, "fp_dev":5, "limit":50, "sigma":1}
     }
     
     def __init__(self):
@@ -71,8 +71,8 @@ class Trader:
             orders.append(Order(product, price, -real_volume))
 
     def current_mid_price(self, order_depth: OrderDepth) -> float:
-        return (order_depth.buy_orders.items[0][0]
-                +order_depth.sell_orders.items[0][0])/2
+        return (list(order_depth.buy_orders.items())[0][0]
+                +list(order_depth.sell_orders.items())[0][0])/2
 
     def run(self, state: TradingState) -> tuple[Dict[str, List[Order]], int, str]:
         """Main trading method called each timestamp."""
@@ -90,7 +90,7 @@ class Trader:
             params = self.PRODUCT_PARAMS.get(symbol, {})
             if symbol == self.active_products[1]:  # STARFRUIT/KELP
                 current_price=self.current_mid_price(order_depth)
-                current_var=params["sigma"]*time
+                current_var=params["sigma"]*(10000.1-time)
                 param_price=params["fp_mean"]
                 param_var=params["fp_dev"]**2
                 final_var=1/(1/current_var+1/param_var)
