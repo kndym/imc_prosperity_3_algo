@@ -3,7 +3,6 @@ from typing import List
 import numpy as np
 import statistics as stat
 from typing import List, Dict, Any
-from logger import Logger
 
 class Trader:
     """Main trading class implementing different strategies for different products."""
@@ -16,8 +15,6 @@ class Trader:
     
     def __init__(self):
         self.active_products = ["RAINFOREST_RESIN", "KELP", "SQUID_INK"]  
-        self.logger=Logger() 
-
 
     def prob_algo(self, product: str, 
                   final_price_mean: float, final_price_dev: float,
@@ -78,7 +75,7 @@ class Trader:
                     orders.append(Order(product, ask, -ask_amount))  
         if len(order_depth.buy_orders)!=0:
             for bid, bid_amount in order_depth.buy_orders.items():
-                if int(bid)>fair_price:
+                if int(bid)>=fair_price:
                     orders.append(Order(product, bid, -bid_amount)) 
     
     def volitile_algo(self, product: str, 
@@ -109,8 +106,7 @@ class Trader:
                 fair=params["fp"]
                 self.stable_algo(symbol, fair, order_depth, orders)
             else:
-                self.volitile_algo(symbol, order_depth, orders)
+                pass
             result[symbol] = orders
-        self.logger.flush(state, result, 1, "SAMPLE")
         return result, 1, "SAMPLE"
     
