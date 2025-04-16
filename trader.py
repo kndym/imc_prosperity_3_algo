@@ -8,6 +8,7 @@ import jsonpickle # Make sure to import jsonpickle
 # Assuming Logger is defined elsewhere or removing its usage for brevity
 from logger import Logger
 
+
 class Product: # Define Product constants if not already globally available
     AMETHYSTS = "AMETHYSTS" # Example, add others if needed
     STARFRUIT = "STARFRUIT" # Example

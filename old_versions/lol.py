@@ -1,125 +1,283 @@
+from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState, UserId
+from typing import List, Dict, Any
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
+import jsonpickle
 
-all_prices_df=pd.read_csv("round_1_data/prices_round_1_day_-2.csv")
+logger = Logger()
 
-ink_prices_df=all_prices_df[all_prices_df["product"]=="SQUID_INK"]
+class Product:
+    AMETHYSTS = "AMETHYSTS"
+    STARFRUIT = "STARFRUIT"
+    RAINFOREST_RESIN = "RAINFOREST_RESIN"
+    KELP = "KELP"
+    SQUID_INK = "SQUID_INK"
+    PICNIC_BASKET2 = "PICNIC_BASKET2"
+    PICNIC_BASKET1 = "PICNIC_BASKET1"
+    CROISSANTS = "CROISSANTS"
+    JAMS = "JAMS"
+    DJEMBE = "DJEMBES"
 
-ink_prices=list(ink_prices_df["mid_price"])
+class Trader:
+    PRODUCT_PARAMS = {
+        Product.RAINFOREST_RESIN: {
+            "fair_value": 10000,
+            "limit": 50,
+            "take_width": 1,
+            "clear_width": 2,
+            "disregard_edge": 1,
+            "join_edge": 7,
+            "default_edge": 0,
+            "soft_position_limit": 100,
+            "manage_position": True,
+        },
+        Product.KELP: {
+            "limit": 50,
+            "adverse_volume": 15,
+            "reversion_beta": -0.2,
+            "take_width": 1,
+            "clear_width": 0,
+            "prevent_adverse": False,
+            "disregard_edge": 0,
+            "join_edge": 20,
+            "default_edge": 5,
+            "soft_position_limit": 20,
+            "manage_position": False,
+        },
+        Product.SQUID_INK: {
+            "limit": 50,
+            "adverse_volume": 15,
+            "reversion_beta": -0.15,
+            "take_width": 1,
+            "clear_width": 0,
+            "prevent_adverse": False,
+            "disregard_edge": 0,
+            "join_edge": 20,
+            "default_edge": 5,
+            "soft_position_limit": 20,
+            "manage_position": False,
+        },
+        Product.DJEMBE: {
+            "limit": 50,
+            "adverse_volume": 15,
+            "reversion_beta": -0.2,
+            "take_width": 1,
+            "clear_width": 0,
+            "prevent_adverse": False,
+            "disregard_edge": 0,
+            "join_edge": 20,
+            "default_edge": 5,
+            "soft_position_limit": 20,
+            "manage_position": False,
+        },
+        Product.JAMS: {
+            "limit": 350,
+            "adverse_volume": 15,
+            "reversion_beta": -0.15,
+            "take_width": 1,
+            "clear_width": 0,
+            "prevent_adverse": False,
+            "disregard_edge": 0,
+            "join_edge": 150,
+            "default_edge": 5,
+            "soft_position_limit": 20,
+            "manage_position": False,
+        },
+        Product.CROISSANTS: {
+            "limit": 250,
+            "adverse_volume": 15,
+            "reversion_beta": -0.15,
+            "take_width": 1,
+            "clear_width": 0,
+            "prevent_adverse": False,
+            "disregard_edge": 0,
+            "join_edge": 100,
+            "default_edge": 5,
+            "soft_position_limit": 20,
+            "manage_position": False,
+        },
+        Product.PICNIC_BASKET1: {
+            "limit": 60,
+            "take_width": 1,
+            "clear_width": 0,
+            "prevent_adverse": False,
+            "adverse_volume": 0,
+            "disregard_edge": 0,
+            "join_edge": 0,
+            "default_edge": 0,
+            "soft_position_limit": 0,
+            "manage_position": False,
+            "synthetic_formula": {"CROISSANTS": 6, "JAMS": 3, "DJEMBE": 1},
+        },
+        Product.PICNIC_BASKET2: {
+            "limit": 100,
+            "take_width": 1,
+            "clear_width": 0,
+            "prevent_adverse": False,
+            "adverse_volume": 0,
+            "disregard_edge": 0,
+            "join_edge": 0,
+            "default_edge": 0,
+            "soft_position_limit": 0,
+            "manage_position": False,
+            "synthetic_formula": {"CROISSANTS": 4, "JAMS": 2},
+        }
+    }
 
+    def __init__(self):
+        self.active_products = [
+            Product.RAINFOREST_RESIN, Product.KELP, Product.SQUID_INK,
+            Product.PICNIC_BASKET1, Product.PICNIC_BASKET2,
+            Product.DJEMBE, Product.JAMS, Product.CROISSANTS
+        ]
 
-# --- Simulate realistic KELP midprice data (replace later with your real data) ---
-np.random.seed(42)
-kelp_prices = np.array(ink_prices)
+    def compute_synthetic_price(self, symbol: str, state: TradingState) -> float | None:
+        params = self.PRODUCT_PARAMS.get(symbol, {})
+        synthetic_components = params.get("synthetic_formula", {})
+        component_prices = {}
+        for comp, weight in synthetic_components.items():
+            comp_depth = state.order_depths.get(comp, None)
+            if not comp_depth or not comp_depth.sell_orders or not comp_depth.buy_orders:
+                return None
+            best_ask = min(comp_depth.sell_orders.keys())
+            best_bid = max(comp_depth.buy_orders.keys())
+            component_prices[comp] = (best_ask + best_bid) / 2
+        synthetic_price = sum(component_prices[comp] * weight for comp, weight in synthetic_components.items())
+        return synthetic_price
 
-# --- Calculate indicators ---
-velocity = np.diff(kelp_prices, prepend=kelp_prices[0])
-acceleration = np.diff(velocity, prepend=velocity[0])
-rolling_mean = pd.Series(kelp_prices).rolling(50).mean()
-rolling_std = pd.Series(kelp_prices).rolling(50).std()
-zscore = (pd.Series(kelp_prices) - rolling_mean) / rolling_std
-zscore = zscore.fillna(0).values  # Replace NaN with 0
-
-# --- Q-Learning Setup ---
-n_price_bins = 10
-n_zscore_bins = 5
-n_actions = 3  # 0 = Hold, 1 = Buy, 2 = Sell
-price_bins = np.linspace(min(kelp_prices), max(kelp_prices), n_price_bins)
-zscore_bins = np.linspace(-3, 3, n_zscore_bins)
-
-q_table = np.zeros((n_price_bins, n_zscore_bins, n_actions))
-
-# --- Hyperparameters ---
-alpha = 0.1
-gamma = 0.95
-epsilon = 1.0
-epsilon_decay = 0.995
-min_epsilon = 0.01
-episodes = 100
-position_size = 50
-
-# --- Helper function to get state ---
-def get_state(price, z):
-    p_bin = min(np.digitize(price, price_bins) - 1, n_price_bins - 1)
-    z_bin = min(np.digitize(z, zscore_bins) - 1, n_zscore_bins - 1)
-    return p_bin, z_bin
-
-# --- Training the agent ---
-reward_history = []
-profit_history = []
-
-for ep in range(episodes):
-    inventory = 0
-    cash = 0
-    total_reward = 0
-    buy_price = 0
-
-    for t in range(1, len(kelp_prices)):
-        price = kelp_prices[t]
-        state = get_state(price, zscore[t])
-
-        # ε-greedy with indicator awareness
-        if np.random.rand() < epsilon:
-            action = np.random.randint(n_actions)
+    def calculate_dynamic_fair_value(self, symbol: str, order_depth: OrderDepth, traderObject: Dict) -> float | None:
+        if symbol not in self.PRODUCT_PARAMS:
+            return None
+        params = self.PRODUCT_PARAMS[symbol]
+        state_key = f"{symbol}_last_price"
+        if len(order_depth.sell_orders) == 0 or len(order_depth.buy_orders) == 0:
+            return None
+        best_ask = min(order_depth.sell_orders.keys())
+        best_bid = max(order_depth.buy_orders.keys())
+        filtered_ask = [price for price, vol in order_depth.sell_orders.items() if abs(vol) >= params["adverse_volume"]]
+        filtered_bid = [price for price, vol in order_depth.buy_orders.items() if abs(vol) >= params["adverse_volume"]]
+        mm_ask = min(filtered_ask) if filtered_ask else None
+        mm_bid = max(filtered_bid) if filtered_bid else None
+        last_price = traderObject.get(state_key, None)
+        if mm_ask is None or mm_bid is None:
+            mmmid_price = (best_ask + best_bid) / 2 if last_price is None else last_price
         else:
-            if inventory > 0 and price - buy_price > 2:
-                action = 0  # Hold after profit
-            elif zscore[t] < -1 and velocity[t] > 0:
-                action = 1  # Buy
-            elif zscore[t] > 1 and velocity[t] < 0 and inventory > 0:
-                action = 2  # Sell
-            else:
-                action = np.argmax(q_table[state])
+            mmmid_price = (mm_ask + mm_bid) / 2
+        fair_value = mmmid_price
+        if last_price is not None and last_price != 0:
+            try:
+                last_returns = (mmmid_price - last_price) / last_price
+                pred_returns = last_returns * params["reversion_beta"]
+                fair_value = mmmid_price + (mmmid_price * pred_returns)
+            except ZeroDivisionError:
+                pass
+        traderObject[state_key] = mmmid_price
+        return fair_value
 
-        reward = 0
+    def take_best_orders(self, product: str, fair_value: float, take_width: float, orders: List[Order], order_depth: OrderDepth, position: int, buy_vol: int, sell_vol: int, prevent_adverse: bool, adverse_volume: int) -> (int, int):
+        position_limit = self.PRODUCT_PARAMS[product]["limit"]
+        if order_depth.sell_orders:
+            best_ask = min(order_depth.sell_orders.keys())
+            best_ask_volume = order_depth.sell_orders[best_ask]
+            should_trade = not prevent_adverse or abs(best_ask_volume) <= adverse_volume
+            if should_trade and best_ask <= fair_value - take_width:
+                max_buy = position_limit - (position + buy_vol)
+                qty = min(abs(best_ask_volume), max_buy)
+                if qty > 0:
+                    orders.append(Order(product, best_ask, qty))
+                    buy_vol += qty
+        if order_depth.buy_orders:
+            best_bid = max(order_depth.buy_orders.keys())
+            best_bid_volume = order_depth.buy_orders[best_bid]
+            should_trade = not prevent_adverse or abs(best_bid_volume) <= adverse_volume
+            if should_trade and best_bid >= fair_value + take_width:
+                max_sell = position_limit + (position - sell_vol)
+                qty = min(best_bid_volume, max_sell)
+                if qty > 0:
+                    orders.append(Order(product, best_bid, -qty))
+                    sell_vol += qty
+        return buy_vol, sell_vol
 
-        # --- Trade Logic ---
-        if action == 1 and inventory == 0:
-            inventory = position_size
-            buy_price = price
-        elif action == 2 and inventory > 0:
-            reward = (price - buy_price) * inventory
-            cash += reward
-            inventory = 0
-        else:
-            reward = -0.1  # small penalty to discourage doing nothing too long
+    def clear_position_order(self, product: str, fair_value: float, clear_width: float, orders: List[Order], order_depth: OrderDepth, position: int, buy_vol: int, sell_vol: int) -> (int, int):
+        position_limit = self.PRODUCT_PARAMS[product]["limit"]
+        current_pos = position + buy_vol - sell_vol
+        if current_pos > 0:
+            target_price = round(fair_value + clear_width)
+            available = sum(vol for price, vol in order_depth.buy_orders.items() if price >= target_price)
+            qty = min(current_pos, available)
+            if qty > 0:
+                orders.append(Order(product, target_price, -qty))
+                sell_vol += qty
+        elif current_pos < 0:
+            target_price = round(fair_value - clear_width)
+            available = sum(abs(vol) for price, vol in order_depth.sell_orders.items() if price <= target_price)
+            qty = min(abs(current_pos), available)
+            if qty > 0:
+                orders.append(Order(product, target_price, qty))
+                buy_vol += qty
+        return buy_vol, sell_vol
 
-        # --- Q-Table Update ---
-        next_state = get_state(price, zscore[t])
-        old_value = q_table[state][action]
-        next_max = np.max(q_table[next_state])
-        new_value = old_value + alpha * (reward + gamma * next_max - old_value)
-        q_table[state][action] = new_value
+    def make_orders(self, product: str, order_depth: OrderDepth, fair_value: float, position: int, buy_vol: int, sell_vol: int, params: Dict[str, Any]):
+        orders = []
+        disregard = params["disregard_edge"]
+        join_edge = params["join_edge"]
+        default_edge = params["default_edge"]
+        asks_above = [p for p in order_depth.sell_orders.keys() if p > fair_value + disregard]
+        bids_below = [p for p in order_depth.buy_orders.keys() if p < fair_value - disregard]
+        best_ask_above = min(asks_above) if asks_above else None
+        best_bid_below = max(bids_below) if bids_below else None
+        ask_price = round(fair_value + default_edge)
+        if best_ask_above:
+            ask_price = best_ask_above if best_ask_above <= fair_value + join_edge else best_ask_above - 1
+        bid_price = round(fair_value - default_edge)
+        if best_bid_below:
+            bid_price = best_bid_below if best_bid_below >= fair_value - join_edge else best_bid_below + 1
+        bid_price = min(bid_price, ask_price - 1)
+        pos_after = position + buy_vol - sell_vol
+        buy_allowed = params["limit"] - pos_after
+        if buy_allowed > 0:
+            orders.append(Order(product, bid_price, buy_allowed))
+        sell_allowed = params["limit"] + pos_after
+        if sell_allowed > 0:
+            orders.append(Order(product, ask_price, -sell_allowed))
+        return orders, buy_vol, sell_vol
 
-        total_reward += reward
-
-    epsilon = max(min_epsilon, epsilon * epsilon_decay)
-    reward_history.append(total_reward)
-    profit_history.append(cash)
-    print(f"Episode {ep}, Total Reward: {total_reward:.2f}, Total Profit: {cash:.2f}")
-
-# --- Plot Reward & Profit Over Episodes ---
-plt.figure(figsize=(14, 5))
-
-plt.subplot(1, 2, 1)
-plt.plot(reward_history)
-plt.title("Total Reward per Episode")
-plt.xlabel("Episode")
-plt.ylabel("Reward")
-plt.grid(True)
-
-plt.subplot(1, 2, 2)
-plt.plot(profit_history)
-plt.title("Cumulative Profit per Episode")
-plt.xlabel("Episode")
-plt.ylabel("Profit ($)")
-plt.grid(True)
-
-plt.tight_layout()
-plt.show()
-
-# --- Final Profit Summary ---
-print("\nFinal 5 Episode Profits:")
-print(profit_history[-5:])
-print(f"💰 Final Total Profit: ${profit_history[-1]:.2f}")
+    def run(self, state: TradingState) -> tuple[Dict[str, List[Order]], int, str]:
+        result = {}
+        conversions = 0
+        traderObject = jsonpickle.decode(state.traderData) if state.traderData else {}
+        for symbol in self.active_products:
+            if symbol not in state.order_depths:
+                continue
+            order_depth = state.order_depths[symbol]
+            orders = []
+            position = state.position.get(symbol, 0)
+            params = self.PRODUCT_PARAMS.get(symbol, {})
+            if not params or params["limit"] == 0:
+                continue
+            buy_vol, sell_vol = 0, 0
+            if symbol == Product.RAINFOREST_RESIN:
+                fair_value = params["fair_value"]
+                buy_vol, sell_vol = self.take_best_orders(symbol, fair_value, params["take_width"], orders, order_depth, position, buy_vol, sell_vol, False, 0)
+                buy_vol, sell_vol = self.clear_position_order(symbol, fair_value, params["clear_width"], orders, order_depth, position, buy_vol, sell_vol)
+                make_orders, _, _ = self.make_orders(symbol, order_depth, fair_value, position, buy_vol, sell_vol, params)
+                orders.extend(make_orders)
+            elif symbol in [Product.KELP, Product.SQUID_INK, Product.DJEMBE, Product.JAMS, Product.CROISSANTS]:
+                fair_value = self.calculate_dynamic_fair_value(symbol, order_depth, traderObject)
+                if fair_value is None:
+                    continue
+                buy_vol, sell_vol = self.take_best_orders(symbol, fair_value, params["take_width"], orders, order_depth, position, buy_vol, sell_vol, params["prevent_adverse"], params["adverse_volume"])
+                buy_vol, sell_vol = self.clear_position_order(symbol, fair_value, params["clear_width"], orders, order_depth, position, buy_vol, sell_vol)
+                make_orders, _, _ = self.make_orders(symbol, order_depth, fair_value, position, buy_vol, sell_vol, params)
+                orders.extend(make_orders)
+            elif symbol in [Product.PICNIC_BASKET1, Product.PICNIC_BASKET2]:
+                synthetic_price = self.compute_synthetic_price(symbol, state)
+                if synthetic_price is None:
+                    continue
+                buy_vol, sell_vol = self.take_best_orders(symbol, synthetic_price, params["take_width"], orders, order_depth, position, buy_vol, sell_vol, params["prevent_adverse"], params["adverse_volume"])
+                buy_vol, sell_vol = self.clear_position_order(symbol, synthetic_price, params["clear_width"], orders, order_depth, position, buy_vol, sell_vol)
+                make_orders, _, _ = self.make_orders(symbol, order_depth, synthetic_price, position, buy_vol, sell_vol, params)
+                orders.extend(make_orders)
+            result[symbol] = orders
+        traderData = jsonpickle.encode(traderObject, unpicklable=False)
+        logger.flush(state, result, conversions, traderData)
+        return result, conversions, traderData
